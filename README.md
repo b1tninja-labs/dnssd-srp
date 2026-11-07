@@ -96,7 +96,7 @@ All four gates must pass, on Linux and Windows alike:
 
 ```bash
 ruff check . && ruff format --check .
-mypy dnssd_srp
+mypy dnssd_srp tests
 pytest -q --cov
 python -O -m pytest -q
 ```

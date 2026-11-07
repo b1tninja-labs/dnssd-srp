@@ -4,7 +4,7 @@ Short version: four gates, and they all have to pass on Linux and Windows.
 
 ```bash
 ruff check . && ruff format --check .
-mypy dnssd_srp
+mypy dnssd_srp tests
 pytest -q --cov
 python -O -m pytest -q
 ```
