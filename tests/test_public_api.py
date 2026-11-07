@@ -15,14 +15,14 @@ import pytest
 import dnssd_srp as package
 
 SURFACE = [
-    ("dso", "encode_dso", "RFC 8490"),
-    ("session", "open_session", "RFC 8490"),
+    ("dso", "encode_dso", "RFC 8490 sec. 5.4"),
+    ("session", "open_session", "RFC 8490 sec. 5.1, sec. 6"),
     ("srp", "build_update", "RFC 9665 sec. 3"),
     ("sig0", "sign", "RFC 2931, RFC 9665 sec. 6.6"),
     ("sig0", "verify", "RFC 2931"),
     ("registrar", "validate_update", "RFC 9665 sec. 3.3"),
     ("registrar", "ttl_for", "RFC 9665 sec. 4"),
-    ("push", "subscribe", "RFC 8765"),
+    ("push", "subscribe", "RFC 8765 sec. 6.2"),
     ("discovery", "registrar_from_zone", "RFC 9665 sec. 3.1.1"),
 ]
 
@@ -41,7 +41,10 @@ def test_surface_is_documented(module_name, fn, cite):
     module = importlib.import_module(package.__name__ + "." + module_name)
     target = getattr(module, fn)
     assert target.__doc__, fn + " needs a docstring"
-    assert cite in target.__doc__, fn + " must cite the document that defines it"
+    # Docstrings are wrapped, so a long citation can span a line break; compare words, not layout.
+    assert " ".join(cite.split()) in " ".join(target.__doc__.split()), (
+        fn + " must cite the document that defines it"
+    )
 
 
 @pytest.mark.parametrize(("module_name", "fn", "cite"), SURFACE)

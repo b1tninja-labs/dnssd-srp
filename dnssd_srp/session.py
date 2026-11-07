@@ -20,9 +20,9 @@ __all__ = [
 
 
 async def open_session(resolver: tuple) -> DsoSession:
-    """Pending behaviour defined by RFC 8490.
+    """Pending behaviour defined by RFC 8490 sec. 5.1, sec. 6.
 
     Not implemented yet. See the ``session.open_session()`` row in ROADMAP.md; this stub
     raises on purpose so nothing downstream mistakes it for working code.
     """
-    raise NotImplementedError("open_session() is not implemented: RFC 8490")
+    raise NotImplementedError("open_session() is not implemented: RFC 8490 sec. 5.1, sec. 6")

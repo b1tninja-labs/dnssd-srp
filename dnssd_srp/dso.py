@@ -20,9 +20,9 @@ __all__ = [
 
 
 def encode_dso(message: DsoMessage) -> bytes:
-    """Pending behaviour defined by RFC 8490.
+    """Pending behaviour defined by RFC 8490 sec. 5.4.
 
     Not implemented yet. See the ``dso.encode_dso()`` row in ROADMAP.md; this stub raises
     on purpose so nothing downstream mistakes it for working code.
     """
-    raise NotImplementedError("encode_dso() is not implemented: RFC 8490")
+    raise NotImplementedError("encode_dso() is not implemented: RFC 8490 sec. 5.4")

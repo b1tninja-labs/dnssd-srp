@@ -21,9 +21,9 @@ __all__ = [
 
 
 async def subscribe(session: DsoSession, name: str, rrtype: str) -> AsyncIterator:
-    """Pending behaviour defined by RFC 8765.
+    """Pending behaviour defined by RFC 8765 sec. 6.2.
 
     Not implemented yet. See the ``push.subscribe()`` row in ROADMAP.md; this stub raises
     on purpose so nothing downstream mistakes it for working code.
     """
-    raise NotImplementedError("subscribe() is not implemented: RFC 8765")
+    raise NotImplementedError("subscribe() is not implemented: RFC 8765 sec. 6.2")

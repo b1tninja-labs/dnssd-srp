@@ -11,22 +11,26 @@ behaviour regressed. Reading the code and agreeing with it is not enough. That i
 Legend: `[ok]` implemented and pinned by a named test -- `[part]` partial, with what is
 missing stated -- `[ ]` not implemented -- `[no]` deliberate non-goal.
 
+A Where cell marked `(to be written)` names the test that will pin the row once it exists; no
+such test has been written yet, and the row cannot leave `[ ]` until it has. The Milestone
+column places the row on the ladder in section 2, and `-` means it is not placed yet.
+
 Update the affected row in the same commit that changes the behaviour. A row and its test
 drift apart within one release, and the document becomes useless exactly when it is needed.
 
 ## 1. Obligations
 
-| Obligation | Spec | Status | Where |
-|---|---|---|---|
-| `dso.encode_dso()` | RFC 8490 | `[ ]` | `tests/test_obligations.py::encode_dso` |
-| `session.open_session()` | RFC 8490 | `[ ]` | `tests/test_obligations.py::open_session` |
-| `srp.build_update()` | RFC 9665 sec. 3 | `[ ]` | `tests/test_obligations.py::build_update` |
-| `sig0.sign()` | RFC 2931, RFC 9665 sec. 6.6 | `[ ]` | `tests/test_obligations.py::sign` |
-| `sig0.verify()` | RFC 2931 | `[ ]` | `tests/test_obligations.py::verify` |
-| `registrar.validate_update()` | RFC 9665 sec. 3.3 | `[ ]` | `tests/test_obligations.py::validate_update` |
-| `registrar.ttl_for()` | RFC 9665 sec. 4 | `[ ]` | `tests/test_obligations.py::ttl_for` |
-| `push.subscribe()` | RFC 8765 | `[ ]` | `tests/test_obligations.py::subscribe` |
-| `discovery.registrar_from_zone()` | RFC 9665 sec. 3.1.1 | `[ ]` | `tests/test_obligations.py::registrar_from_zone` |
+| Obligation | Spec | Status | Where | Milestone |
+|---|---|---|---|---|
+| `dso.encode_dso()` | RFC 8490 sec. 5.4 | `[ ]` | `tests/test_obligations.py::test_encode_dso` (to be written) | M1 |
+| `session.open_session()` | RFC 8490 sec. 5.1, sec. 6 | `[ ]` | `tests/test_obligations.py::test_open_session` (to be written) | M1 |
+| `srp.build_update()` | RFC 9665 sec. 3 | `[ ]` | `tests/test_obligations.py::test_build_update` (to be written) | M3 |
+| `sig0.sign()` | RFC 2931, RFC 9665 sec. 6.6 | `[ ]` | `tests/test_obligations.py::test_sign` (to be written) | M2 |
+| `sig0.verify()` | RFC 2931 | `[ ]` | `tests/test_obligations.py::test_verify` (to be written) | M2 |
+| `registrar.validate_update()` | RFC 9665 sec. 3.3 | `[ ]` | `tests/test_obligations.py::test_validate_update` (to be written) | M4 |
+| `registrar.ttl_for()` | RFC 9665 sec. 4 | `[ ]` | `tests/test_obligations.py::test_ttl_for` (to be written) | M4 |
+| `push.subscribe()` | RFC 8765 sec. 6.2 | `[ ]` | `tests/test_obligations.py::test_subscribe` (to be written) | M5 |
+| `discovery.registrar_from_zone()` | RFC 9665 sec. 3.1.1 | `[ ]` | `tests/test_obligations.py::test_registrar_from_zone` (to be written) | M3 |
 
 ## 2. Milestones
 
@@ -58,6 +62,7 @@ the code existing. Coverage in `pyproject.toml` ratchets in the same commit.
 
 - share the DNS codec with namespy through a dependency, or keep a thin local layer
 - how much of the registrar is a server rather than a validator
+- M6 names a discovery proxy front end (RFC 8766), but no api row sits on it: add a proxy row, or drop the proxy from M6
 
 ## 6. Publication checklist
 
