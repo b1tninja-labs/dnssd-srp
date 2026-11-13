@@ -33,6 +33,10 @@ import struct
 from dataclasses import dataclass
 from enum import Enum
 
+from namespy.enums import DnsOpCode, DnsQR, DnsResponseCode
+from namespy.packet import DnsPacket
+from namespy.wire import DnsPacketParseError
+
 __all__ = [
     "DSO_OPCODE",
     "ENCRYPTION_PADDING",
@@ -58,8 +62,9 @@ __all__ = [
     "retry_delay_tlv",
 ]
 
-#: RFC 8490 section 5.4.1 paragraph 6: the DSO OPCODE.
-DSO_OPCODE = 6
+#: RFC 8490 section 5.4.1 paragraph 6: the DSO OPCODE, which is namespy's ``DnsOpCode.DSO``
+#: (RFC 8490 section 10.1). The header is namespy's too: see :func:`encode_dso`.
+DSO_OPCODE = int(DnsOpCode.DSO)
 
 #: DSO-TYPE registry, RFC 8490 section 10.3 (type 0 is reserved and never sent).
 KEEPALIVE = 1
@@ -67,17 +72,18 @@ RETRY_DELAY = 2
 ENCRYPTION_PADDING = 3
 
 #: Response codes of section 5.4.1 paragraph 10.
-RCODE_NOERROR = 0
-RCODE_FORMERR = 1
-RCODE_SERVFAIL = 2
-RCODE_NOTIMP = 4
-RCODE_REFUSED = 5
-RCODE_DSOTYPENI = 11
+RCODE_NOERROR = int(DnsResponseCode.NO_ERROR)
+RCODE_FORMERR = int(DnsResponseCode.FORMAT_ERROR)
+RCODE_SERVFAIL = int(DnsResponseCode.SERVER_FAILURE)
+RCODE_NOTIMP = int(DnsResponseCode.NOT_IMPLEMENTED)
+RCODE_REFUSED = int(DnsResponseCode.REFUSED)
+RCODE_DSOTYPENI = int(DnsResponseCode.DSOTYPENI)  # RFC 8490 section 10.2
 
 #: RFC 8490 section 7.1 paragraph 6: "The keepalive interval MUST NOT be less than ten seconds."
 MIN_KEEPALIVE_INTERVAL_MS = 10_000
 
-_HEADER = struct.Struct("!HHHHHH")  # ID, flags, QDCOUNT, ANCOUNT, NSCOUNT, ARCOUNT
+_HEADER_OCTETS = 12
+_COUNTS = struct.Struct("!4H")  # QDCOUNT, ANCOUNT, NSCOUNT, ARCOUNT, at offset 4
 _TLV_HEAD = struct.Struct("!HH")
 _U32_MAX = 0xFFFFFFFF
 _U16_MAX = 0xFFFF
@@ -160,8 +166,17 @@ def encode_dso(message: DsoMessage) -> bytes:
         raise DsoError("a DSO request or unidirectional message needs at least one TLV (5.4.2)")
     if message.qr and message.message_id == 0:
         raise DsoError("a DSO response needs a nonzero MESSAGE ID (5.4.1)", fatal=True)
-    flags = (int(message.qr) << 15) | (DSO_OPCODE << 11) | message.rcode
-    out = bytearray(_HEADER.pack(message.message_id, flags, 0, 0, 0, 0))
+    # The header is the shared codec's: a DnsPacket with every flag clear except QR, OPCODE and
+    # RCODE and no sections serialises to the twelve octets of RFC 8490 section 5.4 (the Z bits,
+    # AA, TC, RD, RA, AD and CD are all zero, which is what "MUST be set to zero" asks).
+    header = DnsPacket(
+        message.message_id,
+        QR=DnsQR.RESPONSE if message.qr else DnsQR.QUERY,
+        OPCODE=DnsOpCode.DSO,
+        RD=False,
+        RCODE=message.rcode,
+    )
+    out = bytearray(bytes(header))
     for tlv in message.tlvs:
         if tlv.dso_type == 0:
             raise DsoError("DSO-TYPE 0 is reserved and is not sent (RFC 8490 section 10.3)")
@@ -179,10 +194,17 @@ def decode_dso(data: bytes) -> DsoMessage:
     a DSO-TYPE of 0, are kept in order: ignoring them is the session's decision (section 5.4.5).
     """
     data = bytes(data)
-    if len(data) < _HEADER.size:
+    if len(data) < _HEADER_OCTETS:
         raise DsoError(f"DSO message of {len(data)} octets is shorter than the 12-octet header")
-    message_id, flags, qd, an, ns, ar = _HEADER.unpack_from(data)
-    opcode = (flags >> 11) & 0xF
+    # The counts are read by hand and zeroed before the shared parser sees the header: with a
+    # nonzero count it would go looking for sections, and RFC 8490 section 5.4 paragraph 2 wants
+    # FORMERR, not a parse error.
+    qd, an, ns, ar = _COUNTS.unpack_from(data, 4)
+    try:
+        header, _ = DnsPacket.parse(data[:4] + bytes(8))
+    except DnsPacketParseError as exc:  # pragma: no cover - twelve octets always parse
+        raise DsoError(f"unreadable DSO header: {exc}") from exc
+    opcode = int(header.OPCODE)
     if opcode != DSO_OPCODE:
         raise DsoError(f"OPCODE {opcode} is not the DSO OPCODE ({DSO_OPCODE})")
     if qd or an or ns or ar:
@@ -190,9 +212,10 @@ def decode_dso(data: bytes) -> DsoMessage:
             f"DSO counts must all be zero, got QD={qd} AN={an} NS={ns} AR={ar} (5.4)",
             rcode=RCODE_FORMERR,
         )
-    qr = bool(flags & 0x8000)
+    message_id = header.ID
+    qr = int(header.QR) == int(DnsQR.RESPONSE)
     tlvs: list[Tlv] = []
-    offset = _HEADER.size
+    offset = _HEADER_OCTETS
     while offset < len(data):
         if len(data) - offset < _TLV_HEAD.size:
             raise DsoError(f"{len(data) - offset} stray octet(s) where a TLV header should be")
@@ -208,7 +231,7 @@ def decode_dso(data: bytes) -> DsoMessage:
         raise DsoError("a DSO response with MESSAGE ID 0 is a fatal error (5.4.1)", fatal=True)
     if not qr and not tlvs:
         raise DsoError("a DSO request or unidirectional message has no TLV (5.4.2)")
-    return DsoMessage(message_id, qr, flags & 0xF, tuple(tlvs))
+    return DsoMessage(message_id, qr, int(header.RCODE), tuple(tlvs))
 
 
 def _u32(value: int, what: str) -> int:

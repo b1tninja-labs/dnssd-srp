@@ -12,29 +12,44 @@ backend boundary, which already pins the 13/``x|y``/``r|s`` layout), and signing
 need the ``crypto`` extra. The SIG record layout, the signed-data construction and the
 time-window check are ours.
 
-What is *not* here yet: building the SIG RDATA and the SIG(0) RR from a DNS message (the
-layout is RFC 2535 section 4.1, which RFC 2931 section 3 paragraph 1 keeps normative for
-SIG(0) although RFC 2535 itself is obsolete), and the SHOULD set of RFC 9665 section 6.6, which
-points at RFC 8624 (obsolete; RFC 9904 moved its table to the IANA registries) and so is read
-from the registry rather than a table here. See the ``sig0.`` rows of ROADMAP.md.
+The SIG(0) record itself is namespy's :class:`namespy.rdata.RData_SIG` (RFC 2535 section 4.1,
+which RFC 2931 section 3 paragraph 1 keeps normative for SIG(0) although RFC 2535 is obsolete) and
+the public key travels as :class:`namespy.rdata.RData_KEY`; :func:`sign_request` appends the
+record to a request and :func:`verify_request` checks one.
+
+What is *not* here yet: the SHOULD set of RFC 9665 section 6.6, which points at RFC 8624
+(obsolete; RFC 9904 moved its table to the IANA registries) and so is read from the registry
+rather than a table here. See the ``sig0.`` rows of ROADMAP.md.
 """
 
 from __future__ import annotations
 
 import importlib
+import struct
 from dataclasses import dataclass
 
 from namespy.crypto import MissingCryptoError, SignatureMaterialError, verify_dnskey_signature
+from namespy.enums import DnsRClass, DnsRType
+from namespy.names import DomainName
+from namespy.packet import DnsQuestion, DnsRecord
+from namespy.rdata import RData_KEY, RData_SIG
+from namespy.wire import DnsPacketParseError
 
 __all__ = [
     "ALGORITHM_ECDSAP256SHA256",
+    "KEY_PROTOCOL_DNSSEC",
     "MAX_SKEW_SECONDS",
     "Sig0Error",
+    "Sig0Parts",
     "SigningKey",
     "VerifyKey",
+    "key_rr",
     "sign",
+    "sign_request",
     "signed_data",
+    "split_sig0",
     "verify",
+    "verify_request",
     "within_validity",
 ]
 
@@ -153,3 +168,125 @@ def verify(message: bytes, signature: bytes, key: VerifyKey) -> bool:
         )
     except SignatureMaterialError as exc:
         raise Sig0Error(f"unusable key: {exc}") from exc
+
+
+#: The KEY protocol octet an SRP requester uses: 3, "dnssec" (RFC 2535 section 3.1.3). RFC 9665
+#: does not state the value; it says the KEY is "defined in" RFC 4034 and the flags are zero.
+KEY_PROTOCOL_DNSSEC = 3
+
+
+def key_rr(public_key: bytes, algorithm: int = ALGORITHM_ECDSAP256SHA256) -> RData_KEY:
+    """The KEY RDATA of an SRP update: flags zero (RFC 9665 section 3.2.5.1 paragraph 5), protocol 3."""
+    return RData_KEY(0, KEY_PROTOCOL_DNSSEC, algorithm, bytes(public_key))
+
+
+def _sig_rr(rdata: RData_SIG) -> DnsRecord:
+    """Owner root, class ANY, TTL 0: what RFC 2931 section 3 paragraph 3 says a SIG(0) SHOULD be."""
+    return DnsRecord(DomainName("."), DnsRType.SIG, DnsRClass.ANY, 0, rdata=rdata)
+
+
+def _with_extra_additional(message: bytes, record: bytes) -> bytes:
+    arcount = struct.unpack_from("!H", message, 10)[0]
+    if arcount == 0xFFFF:
+        raise Sig0Error("the additional section is full")
+    return message[:10] + struct.pack("!H", arcount + 1) + message[12:] + record
+
+
+def sign_request(
+    request: bytes,
+    key: SigningKey,
+    *,
+    signer: str,
+    key_tag: int,
+    now: int,
+    before: int = 60,
+    after: int = 240,
+) -> bytes:
+    """Append a SIG(0) to ``request`` and return the signed message (RFC 2931 section 3.1).
+
+    The signature covers ``RDATA | request`` where ``request`` is the message as it stands, with
+    ARCOUNT *not* yet counting the SIG(0) (section 3.1 paragraph 2), and RDATA is the SIG RDATA
+    with the signature omitted. The SIG(0) goes last in the additional section, so the OPT record
+    the caller already added stays ahead of it. ``signer`` is the host name that owns the KEY
+    (section 3 paragraph 2). The lifetime bracket is ``now - before`` to ``now + after`` seconds,
+    inside the 5 minutes either side of section 3.3 paragraph 1; both are this module's choices.
+    Type covered, labels and original TTL are zero.
+    """
+    request = bytes(request)
+    if len(request) < 12:
+        raise Sig0Error("a DNS message is at least 12 octets")
+    inception, expiration = now - before, now + after
+    if inception < 0 or expiration > 0xFFFFFFFF:
+        raise Sig0Error("the validity bracket does not fit the 32-bit fields")
+    shell = RData_SIG(
+        0, key.algorithm, 0, 0, expiration, inception, key_tag, signer, b"\x00"
+    )  # a placeholder signature: only the fields before it are signed
+    data = signed_data(shell.rdata_without_signature(), request)
+    signature = sign(data, key)
+    sig = RData_SIG(0, key.algorithm, 0, 0, expiration, inception, key_tag, signer, signature)
+    return _with_extra_additional(request, bytes(_sig_rr(sig)))
+
+
+@dataclass(frozen=True)
+class Sig0Parts:
+    """A message split at its SIG(0): the request as it was signed, and the SIG record."""
+
+    request: bytes
+    sig: RData_SIG
+    record: DnsRecord
+
+
+def split_sig0(message: bytes) -> Sig0Parts | None:
+    """Split off a trailing SIG(0); ``None`` when the message does not end with one.
+
+    A SIG(0) is "at the end of the query additional information section" with type covered zero
+    (RFC 2931 section 3.1 paragraph 1). The returned request has ARCOUNT reduced by one, the form
+    section 3.1 paragraph 2 says was signed. Sections are walked by offset, so a compressed
+    signer name does not make the SIG look shorter or longer than it was.
+    """
+    message = bytes(message)
+    if len(message) < 12:
+        return None
+    qd, an, ns, ar = struct.unpack_from("!4H", message, 4)
+    if ar == 0:
+        return None
+    try:
+        at = 12
+        for _ in range(qd):
+            _, at = DnsQuestion.parse(message, at)
+        last_start = at
+        last: DnsRecord | None = None
+        for _ in range(an + ns + ar):
+            last_start = at
+            last, at = DnsRecord.parse(message, at)
+    except DnsPacketParseError:
+        return None
+    if at != len(message) or last is None or int(last.rtype) != int(DnsRType.SIG):
+        return None
+    sig = last.rdata
+    if not isinstance(sig, RData_SIG) or not sig.is_sig0:
+        return None
+    request = message[:10] + struct.pack("!H", ar - 1) + message[12:last_start]
+    return Sig0Parts(request, sig, last)
+
+
+def verify_request(
+    message: bytes, key: VerifyKey, *, now: int, skew: int = MAX_SKEW_SECONDS
+) -> bool:
+    """True when ``message`` ends in a SIG(0) that verifies under ``key`` inside its lifetime.
+
+    False for no SIG(0), a bad signature, an algorithm mismatch between the SIG and the key, or a
+    bracket :func:`within_validity` refuses. A key that is not usable raises :class:`Sig0Error`,
+    as :func:`verify` does. This does not decide whose key it is: that the signer owns a KEY
+    equal to ``key`` is the registrar's check (RFC 9665 section 3.3.3).
+    """
+    parts = split_sig0(message)
+    if parts is None:
+        return False
+    sig = parts.sig
+    if sig.algorithm != key.algorithm:
+        return False
+    if not within_validity(sig.inception, sig.expiration, now, skew):
+        return False
+    data = signed_data(sig.rdata_without_signature(), parts.request)
+    return verify(data, sig.signature, key)

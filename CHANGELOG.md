@@ -6,6 +6,10 @@ The format follows Keep a Changelog, and this project adheres to Semantic Versio
 
 ### Added
 
+- SRP over namespy's codecs: `sig0.sign_request`, `verify_request` and `split_sig0` (the SIG(0)
+  record is `namespy.rdata.RData_SIG`, the key `RData_KEY`); `srp.build_update` and
+  `srp.update_message`; `registrar.classify_update`, `check_fcfs`, `check_signature` and
+  `validate_update` (RFC 9665 sec. 3.2 and 3.3). The DSO header now comes from namespy's `DnsPacket`.
 - `dso`: `encode_dso` and `decode_dso` for the RFC 8490 sec. 5.4 message, with the refusal rules
   (nonzero counts, truncated or overrunning TLVs, a response with ID 0), and the Keepalive, Retry
   Delay and Encryption Padding TLVs of sec. 7.

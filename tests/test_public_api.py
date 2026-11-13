@@ -33,6 +33,8 @@ IMPLEMENTED = {
     ("registrar", "ttl_for"),
     ("sig0", "sign"),
     ("sig0", "verify"),
+    ("srp", "build_update"),
+    ("registrar", "validate_update"),
 }
 STUBS = [row for row in SURFACE if row[:2] not in IMPLEMENTED]
 

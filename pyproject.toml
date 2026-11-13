@@ -56,7 +56,7 @@ dev = [
 # signature primitive: the portfolio rule (PORTFOLIO.md section 9 item 15) lets `cryptography`
 # supply it, and only it. The SIG record layout, the signed-data construction and the r|s and
 # x|y encodings (RFC 6605 sec. 4) stay ours.
-crypto = ["cryptography>50.0.2"]
+crypto = ["cryptography>=46.0.7"]
 
 [project.urls]
 Homepage = "https://github.com/b1tninja/dnssd-srp"
