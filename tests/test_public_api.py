@@ -27,6 +27,16 @@ SURFACE = [
 ]
 
 
+#: Implemented and pinned by their own test files; the stub contract below no longer applies.
+IMPLEMENTED = {
+    ("dso", "encode_dso"),
+    ("registrar", "ttl_for"),
+    ("sig0", "sign"),
+    ("sig0", "verify"),
+}
+STUBS = [row for row in SURFACE if row[:2] not in IMPLEMENTED]
+
+
 def test_version_is_a_string():
     assert isinstance(package.__version__, str)
 
@@ -47,7 +57,7 @@ def test_surface_is_documented(module_name, fn, cite):
     )
 
 
-@pytest.mark.parametrize(("module_name", "fn", "cite"), SURFACE)
+@pytest.mark.parametrize(("module_name", "fn", "cite"), STUBS)
 def test_stubs_are_loud(module_name, fn, cite):
     module = importlib.import_module(package.__name__ + "." + module_name)
     target = getattr(module, fn)

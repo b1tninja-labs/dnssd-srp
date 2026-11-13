@@ -6,9 +6,9 @@ The multicast answer to local service discovery already has a strong Python owne
 
 from __future__ import annotations
 
-from . import apps, cli, discovery, dso, proxy, push, registrar, session, sig0, srp
+from . import apps, cli, discovery, dso, lease, model, proxy, push, registrar, session, sig0, srp
 from .discovery import registrar_from_zone
-from .dso import encode_dso
+from .dso import decode_dso, encode_dso
 from .push import subscribe
 from .registrar import ttl_for, validate_update
 from .session import open_session
@@ -22,9 +22,12 @@ __all__ = [
     "apps",
     "build_update",
     "cli",
+    "decode_dso",
     "discovery",
     "dso",
     "encode_dso",
+    "lease",
+    "model",
     "open_session",
     "proxy",
     "push",

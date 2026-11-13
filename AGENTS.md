@@ -54,9 +54,12 @@ rather than merely incomplete.
 3. **Normative text is never paraphrased from memory.** Fetch it with `rfclib` and
    cite the section. If the text you fetch does not say what the obligation claims,
    the obligation is wrong: fix the roadmap row and say so in the commit.
-4. **Dependencies.** `pyproject.toml` here declares no runtime dependencies. Adding a runtime
-   dependency needs a paragraph of justification in `docs/strategy.md` explaining
-   why the standard library is not enough.
+4. **Dependencies.** The one runtime dependency is `namespy`, by sibling path (`pythonpath` and `mypy_path`
+   `../namespy` in `pyproject.toml`): the DNS message codec, the OPT/option layer and the name type are
+   namespy's, and a second codec here is a bug. `cryptography` is allowed through the `crypto` extra for the
+   ECDSA P-256 signature primitive only (`PORTFOLIO.md` section 9 item 15); every wire format stays ours.
+   Adding anything else needs a paragraph of justification in `docs/strategy.md` explaining why the
+   standard library is not enough.
 5. **Scope.** What is deliberately absent is listed under Non-goals in `README.md`.
    An agent that "helpfully" implements a non-goal has expanded the API surface that
    has to be supported forever.

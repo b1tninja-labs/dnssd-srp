@@ -5,10 +5,17 @@
      the badges stay commented out until the tag exists.
 -->
 
-**Pre-alpha shell.** The package surface, the obligation matrix and the CI gates exist.
-No protocol behaviour is implemented: every public function raises `NotImplementedError`,
-and the test suite records that rather than hiding it. Read
-[ROADMAP.md](ROADMAP.md) before depending on any of it.
+**Pre-alpha.** The codecs and primitives are implemented and pinned by tests: the DSO message and
+base TLVs (RFC 8490), the EDNS(0) Update Lease option (RFC 9664), SRP TTL consistency and policy
+(RFC 9665 sec. 4) and ECDSA P-256 SIG(0) signing and verification (RFC 2931, RFC 6605). Everything
+else is still a stub that raises `NotImplementedError`: the session, the SRP requester, the
+registrar's update validation, push subscriptions and discovery. Which rows are which is in
+[ROADMAP.md](ROADMAP.md); read it before depending on any of it.
+
+Dependencies: [namespy](https://github.com/b1tninja/namespy), the DNS library this is built beside,
+supplies the DNS message codec, the EDNS option layer and the name type (a sibling path dependency
+until it is published); `cryptography` is an optional extra (`dnssd-srp[crypto]`) used for the ECDSA
+P-256 signature primitive and nothing else. Both are explained in [docs/strategy.md](docs/strategy.md).
 
 dnssd-srp -- DNS-SD without multicast
 
@@ -61,7 +68,9 @@ document, which is the honest grain size for a plan. See [docs/rfc-map.md](docs/
 
 | Module | Responsibility |
 |---|---|
-| `dso` | DSO message and TLV codec, session timers (RFC 8490) |
+| `dso` | DSO message and TLV codec, base TLVs (RFC 8490) |
+| `lease` | EDNS(0) Update Lease option, 4- and 8-byte forms (RFC 9664 sec. 4) |
+| `model` | plain data for the update path (`UpdateRR`), no wire format |
 | `session` | stream transport, keepalive, idle timeout, padding (RFC 8490) |
 | `srp` | SRP update construction (RFC 9665 sec. 3) |
 | `registrar` | update validation and lease maintenance (RFC 9665 sec. 3.3, sec. 4, sec. 5) |
