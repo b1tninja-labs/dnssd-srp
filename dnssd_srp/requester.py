@@ -17,9 +17,17 @@ What is pinned, each by ``tests/test_requester.py``:
   was first transmitted (RFC 9664 section 5.2 paragraph 2, RFC 9665 section 5.1 paragraph 7);
 * retries of a refresh that got no response, spaced evenly up to the expiry (RFC 9664 section 5.2
   paragraph 5, whose nine retries are an example, not a requirement).
+* retransmission of an update that went out as a UDP datagram and was not answered (RFC 9664
+  section 6, RFC 9665 section 3.2.3.2): the same message again after a wait that doubles to a cap,
+  a bounded number of times, then :meth:`Requester.give_up`. RFC 9664 section 6 gives no numbers
+  and sends the reader to RFC 1035 section 4.2.1 (a minimum retransmission interval of 2 to 5
+  seconds), RFC 1536 section 1 (back off exponentially, probably to a maximum) and RFC 8085
+  section 3.1.3 (1 second RECOMMENDED as an initial value, shorter values likely problematic).
+  :class:`RetransmitPolicy` holds the choice made here: 2 seconds, doubling, capped at 30 seconds,
+  four transmissions in all. The lease clock still runs from the first transmission. Over a
+  stream there is no retransmission at this layer.
 
-Not here: the socket, retransmission of an unanswered Registration Request (RFC 9664 section 6),
-coalescing of Refresh Requests (section 5.2.1, a MAY) and the choice of the lease to ask for.
+Not here: the socket, coalescing of Refresh Requests (section 5.2.1, a MAY) and the choice of the lease to ask for.
 """
 
 from __future__ import annotations
@@ -35,10 +43,12 @@ __all__ = [
     "REFRESH_JITTER_FRACTION",
     "REGISTRATION_DELAY_GRANULARITY_MS",
     "REGISTRATION_DELAY_MAX_MS",
+    "RETRANSMIT_MIN_INITIAL",
     "RandomSource",
     "Requester",
     "RequesterError",
     "RequesterState",
+    "RetransmitPolicy",
     "refresh_retry_times",
     "registration_delay",
 ]
@@ -47,6 +57,9 @@ REGISTRATION_DELAY_MAX_MS = 3000  # RFC 9664 section 4.2 paragraph 4: "0-3000 mi
 REGISTRATION_DELAY_GRANULARITY_MS = 10  # "a granularity of no more than 10 milliseconds"
 REFRESH_FRACTION = 0.80  # RFC 9664 section 5.2 paragraph 2: "80% of the lease duration"
 REFRESH_JITTER_FRACTION = 0.05  # "plus a random offset between 0% and 5% of the lease duration"
+RETRANSMIT_MIN_INITIAL = (
+    0.5  # RFC 8085 section 3.1.3: 500 ms is used by others, shorter "problematic"
+)
 
 
 class RandomSource(Protocol):
@@ -68,6 +81,40 @@ class RequesterState(Enum):
     DELAYED = "delayed"  # the first Registration Request is waiting out its random delay
     IN_FLIGHT = "in-flight"  # one update sent, no response yet
     REGISTERED = "registered"  # a response arrived; waiting for the refresh time
+    FAILED = "failed"  # a datagram update went unanswered through every retransmission
+
+
+@dataclass(frozen=True)
+class RetransmitPolicy:
+    """How an unanswered UDP update is retransmitted (see the module text for the sources).
+
+    ``initial`` seconds after the first transmission, then ``factor`` times longer after each
+    retransmission, never more than ``cap``; ``transmissions`` counts the first send, so 4 means
+    three retransmissions. After the last transmission the same wait applies once more before the
+    update is given up. These numbers are this library's choice: RFC 9664 section 6 names none.
+    """
+
+    initial: float = 2.0
+    factor: float = 2.0
+    cap: float = 30.0
+    transmissions: int = 4
+
+    def __post_init__(self) -> None:
+        if self.initial < RETRANSMIT_MIN_INITIAL:
+            raise ValueError(
+                f"an initial wait under {RETRANSMIT_MIN_INITIAL} s is the fast retry of RFC 1536"
+            )
+        if self.factor < 1.0 or self.cap < self.initial or self.transmissions < 1:
+            raise ValueError("the policy must back off, not shrink, and send at least once")
+
+    def waits(self) -> tuple[float, ...]:
+        """The wait after each transmission: the last one ends in giving up."""
+        out: list[float] = []
+        wait = self.initial
+        for _ in range(self.transmissions):
+            out.append(min(wait, self.cap))
+            wait *= self.factor
+        return tuple(out)
 
 
 def registration_delay(rng: RandomSource) -> float:
@@ -99,6 +146,9 @@ def refresh_retry_times(first_failure: float, expiry: float, retries: int = 9) -
 class _Outstanding:
     sent_at: float
     requested: UpdateLease
+    waits: tuple[float, ...] = ()  # empty: a stream, nothing to retransmit here
+    transmissions: int = 1
+    next_at: float | None = None
 
 
 class Requester:
@@ -150,8 +200,18 @@ class Requester:
         self._state = RequesterState.DELAYED
         return self._first_send_at
 
-    def send(self, now: float, lease: UpdateLease) -> None:
+    def send(
+        self,
+        now: float,
+        lease: UpdateLease,
+        *,
+        datagram: bool = False,
+        policy: RetransmitPolicy | None = None,
+    ) -> None:
         """Record that an update carrying ``lease`` went out at ``now``.
+
+        ``datagram`` says it went over UDP, which arms retransmission under ``policy`` (the
+        default :class:`RetransmitPolicy`); an update over a stream is never retransmitted here.
 
         RFC 9665 section 3.2.3.3 paragraph 1: until an earlier update "has been acknowledged, the
         requester MUST NOT send any subsequent SRP Updates", so a send while one is in flight
@@ -164,8 +224,54 @@ class Requester:
                 raise RequesterError("the initial Registration Request is still inside its delay")
         elif self._state is RequesterState.IDLE:
             raise RequesterError("start() has not scheduled the initial Registration Request")
-        self._outstanding = _Outstanding(now, lease)
+        waits = (policy or RetransmitPolicy()).waits() if datagram else ()
+        self._outstanding = _Outstanding(now, lease, waits, 1, now + waits[0] if waits else None)
         self._state = RequesterState.IN_FLIGHT
+
+    @property
+    def next_retransmit_at(self) -> float | None:
+        """When to act on the update in flight: send it again, or give it up. None for none."""
+        return None if self._outstanding is None else self._outstanding.next_at
+
+    def retransmit_due(self, now: float) -> str | None:
+        """``"retransmit"`` or ``"give-up"`` when the wait for a response has run out at ``now``.
+
+        The last transmission's wait ends in ``"give-up"``; every earlier one in ``"retransmit"``.
+        """
+        sent = self._outstanding
+        if sent is None or sent.next_at is None or now < sent.next_at:
+            return None
+        return "give-up" if sent.transmissions >= len(sent.waits) else "retransmit"
+
+    def note_retransmission(self, now: float) -> float:
+        """Record that the same update went out again at ``now``; the time to act next.
+
+        The message is the same, with the same message ID (RFC 1536 section 1 condition c is what
+        marks a retry, and what a server uses to drop the duplicate), and the lease still counts
+        from the first transmission.
+        """
+        sent = self._outstanding
+        if sent is None or self.retransmit_due(now) != "retransmit":
+            raise RequesterError("no retransmission is due")
+        self._outstanding = _Outstanding(
+            sent.sent_at,
+            sent.requested,
+            sent.waits,
+            sent.transmissions + 1,
+            now + sent.waits[sent.transmissions],
+        )
+        return self._outstanding.next_at or now
+
+    def give_up(self, now: float) -> None:
+        """Abandon the update in flight after :meth:`retransmit_due` said ``"give-up"``.
+
+        The requester is FAILED: nothing is registered by this attempt, and a later :meth:`send`
+        (to another registrar, or the same one later) starts a fresh attempt with no initial delay.
+        """
+        if self.retransmit_due(now) != "give-up":
+            raise RequesterError("the update in flight has not used up its retransmissions")
+        self._outstanding = None
+        self._state = RequesterState.FAILED
 
     def note_change(self) -> bool:
         """A configuration change. True when it can go out now, False when it must wait.

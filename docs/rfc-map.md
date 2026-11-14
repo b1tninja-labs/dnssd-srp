@@ -17,6 +17,10 @@
 | RFC 2782 | Proposed Standard | 2000-02 | 2026-11-13 |
 | RFC 7858 | Proposed Standard | 2016-05 | 2026-11-13 |
 | RFC 9904 | Proposed Standard | 2025-11 | 2026-11-13 |
+| RFC 7413 | Experimental (TCP Fast Open; RFC 9665 sec. 6.1 forbids a registrar to accept its payloads by default) | 2014-12 | 2026-11-13 |
+| RFC 8085 | Best Current Practice (UDP usage guidelines; sec. 3.1.3 for the retransmission of an unanswered update) | 2017-03 | 2026-11-13 |
+| RFC 1536 | Informational (common DNS implementation errors; sec. 1, fast retransmissions) | 1993-10 | 2026-11-13 |
+| RFC 1035 | Internet Standard (STD 13; sec. 4.2.1, the minimum retransmission interval) | 1987-11 | 2026-11-13 |
 | RFC 8624 | **Obsolete** (obsoleted by RFC 9904) | 2019-06 | 2026-11-13 |
 | RFC 2535 | **Obsolete** (obsoleted by RFC 4033, 4034, 4035) | 1999-03 | 2026-11-13 |
 
